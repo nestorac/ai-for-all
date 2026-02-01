@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Exercise 1 — Rule-Based AI: Thermostat Agent</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial;
+      margin: 20px;
+      max-width: 980px;
+      line-height: 1.35;
+    }
+    h1 { margin: 0 0 10px 0; font-size: 1.4rem; }
+    .grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .card {
+      border: 1px solid rgba(127,127,127,.35);
+      border-radius: 12px;
+      padding: 14px;
+      background: rgba(127,127,127,.06);
+    }
+    label { display: block; margin: 10px 0 6px; font-weight: 600; }
+    input[type="range"] { width: 100%; }
+    .row { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .bigDecision {
+      font-size: 1.3rem;
+      font-weight: 800;
+      padding: 10px 12px;
+      border-radius: 10px;
+      display: inline-block;
+      border: 1px solid rgba(127,127,127,.35);
+      margin-top: 8px;
+    }
+    .pill {
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(127,127,127,.35);
+      font-size: .9rem;
+    }
+    .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+    button {
+      cursor: pointer;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(127,127,127,.35);
+      background: rgba(127,127,127,.10);
+      font-weight: 700;
+    }
+    button:hover { background: rgba(127,127,127,.18); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      overflow: hidden;
+      border-radius: 10px;
+    }
+    th, td {
+      border: 1px solid rgba(127,127,127,.25);
+      padding: 8px;
+      text-align: left;
+      font-size: .95rem;
+    }
+    th { background: rgba(127,127,127,.10); }
+    .small { font-size: .95rem; opacity: .9; }
+    canvas { width: 100%; height: auto; border-radius: 12px; border: 1px solid rgba(127,127,127,.35); }
+    .code {
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(127,127,127,.35);
+      background: rgba(0,0,0,.06);
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Exercise 1 — Build a Rule-Based AI Agent (Thermostat)</h1>
+
+  <div class="grid">
+    <div class="card">
+      <div class="small">
+        Goal: implement an AI agent that chooses one action from a small action space using rules, and can explain its decision.
+      </div>
+
+      <label for="temp">Room temperature (°C)</label>
+      <div class="row">
+        <input id="temp" type="range" min="0" max="40" step="0.5" value="18" />
+        <span class="mono" id="tempVal">18.0</span>
+      </div>
+
+      <label for="target">Target temperature (°C)</label>
+      <div class="row">
+        <input id="target" type="range" min="10" max="30" step="0.5" value="21" />
+        <span class="mono" id="targetVal">21.0</span>
+      </div>
+
+      <label for="deadband">Deadband (tolerance, °C)</label>
+      <div class="row">
+        <input id="deadband" type="range" min="0" max="3" step="0.1" value="1.0" />
+        <span class="mono" id="deadbandVal">1.0</span>
+      </div>
+
+      <div class="btns">
+        <button id="addCase">Add test case</button>
+        <button id="randomize">Randomize inputs</button>
+        <button id="clearCases">Clear cases</button>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <div class="small">AI decision</div>
+        <div class="bigDecision mono" id="decisionBox">IDLE</div>
+        <div class="small" style="margin-top: 8px;">Explanation</div>
+        <div class="code mono" id="explainBox"></div>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <div class="small">Rule set (editable in code)</div>
+        <pre class="code mono" id="rulePreview"></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <canvas id="viz" width="820" height="520"></canvas>
+
+      <div style="margin-top: 12px;">
+        <div class="small">Test cases (what inputs produce which action?)</div>
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Temp</th>
+              <th>Target</th>
+              <th>Deadband</th>
+              <th>Action</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody id="casesBody"></tbody>
+        </table>
+      </div>
+
+      <div style="margin-top: 12px;" class="small">
+        Student tasks:
+        <ol>
+          <li>Change the rules (in the code) to reduce “oscillation” (frequent switching).</li>
+          <li>Add a new action: <span class="pill mono">ECO</span> when target is reached for long enough (you’ll need memory/state).</li>
+          <li>Add one more input: day/night. Make night use a different target automatically.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Exercise 1: Thermostat agent
+    // Core idea: AI = decision function mapping (state) -> action, plus explanation.
+
+    const elTemp = document.getElementById("temp");
+    const elTarget = document.getElementById("target");
+    const elDeadband = document.getElementById("deadband");
+
+    const elTempVal = document.getElementById("tempVal");
+    const elTargetVal = document.getElementById("targetVal");
+    const elDeadbandVal = document.getElementById("deadbandVal");
+
+    const elDecision = document.getElementById("decisionBox");
+    const elExplain = document.getElementById("explainBox");
+    const elCasesBody = document.getElementById("casesBody");
+
+    const canvas = document.getElementById("viz");
+    const ctx = canvas.getContext("2d");
+
+    // Rule preview shown to students
+    const ruleText = `
+IF temp < target - deadband  -> HEAT
+IF temp > target + deadband  -> COOL
+ELSE                         -> IDLE
+`.trim();
+    document.getElementById("rulePreview").textContent = ruleText;
+
+    // The "AI" (decision function)
+    function decideAction(state) {
+      const { temp, target, deadband } = state;
+
+      // These thresholds define a deadband (hysteresis zone) to avoid rapid switching.
+      const low = target - deadband;
+      const high = target + deadband;
+
+      if (temp < low) {
+        return {
+          action: "HEAT",
+          reason: `temp (${temp.toFixed(1)}) < target-deadband (${low.toFixed(1)}), so we heat.`
+        };
+      }
+      if (temp > high) {
+        return {
+          action: "COOL",
+          reason: `temp (${temp.toFixed(1)}) > target+deadband (${high.toFixed(1)}), so we cool.`
+        };
+      }
+      return {
+        action: "IDLE",
+        reason: `temp (${temp.toFixed(1)}) is within [${low.toFixed(1)}, ${high.toFixed(1)}], so we do nothing.`
+      };
+    }
+
+    function getState() {
+      return {
+        temp: Number(elTemp.value),
+        target: Number(elTarget.value),
+        deadband: Number(elDeadband.value)
+      };
+    }
+
+    function updateUI() {
+      const state = getState();
+      elTempVal.textContent = state.temp.toFixed(1);
+      elTargetVal.textContent = state.target.toFixed(1);
+      elDeadbandVal.textContent = state.deadband.toFixed(1);
+
+      const out = decideAction(state);
+      elDecision.textContent = out.action;
+      elExplain.textContent = out.reason;
+
+      draw(state, out.action);
+    }
+
+    function draw(state, action) {
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+
+      // Layout
+      const margin = 28;
+      const panelW = W - margin * 2;
+      const panelH = H - margin * 2;
+
+      // Background frame
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "rgba(127,127,127,.65)";
+      ctx.lineWidth = 2;
+      roundRect(ctx, margin, margin, panelW, panelH, 14);
+      ctx.stroke();
+
+      // Thermometer parameters
+      const thermoX = margin + 80;
+      const thermoY = margin + 50;
+      const thermoH = panelH - 120;
+      const thermoW = 70;
+
+      // Scale (0..40 °C) map to y
+      const tMin = 0, tMax = 40;
+      const yForTemp = (t) => {
+        const p = (t - tMin) / (tMax - tMin);
+        return thermoY + thermoH * (1 - p);
+      };
+
+      // Draw thermometer tube
+      ctx.fillStyle = "rgba(127,127,127,.12)";
+      roundRect(ctx, thermoX, thermoY, thermoW, thermoH, 16);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(127,127,127,.45)";
+      ctx.stroke();
+
+      // Fill for current temp
+      const yTemp = yForTemp(state.temp);
+      const fillTop = Math.max(thermoY, Math.min(thermoY + thermoH, yTemp));
+      ctx.fillStyle = "rgba(255,255,255,.35)";
+      roundRect(ctx, thermoX + 10, fillTop, thermoW - 20, thermoY + thermoH - fillTop, 10);
+      ctx.fill();
+
+      // Target band
+      const low = state.target - state.deadband;
+      const high = state.target + state.deadband;
+      const yLow = yForTemp(low);
+      const yHigh = yForTemp(high);
+
+      ctx.fillStyle = "rgba(127,127,127,.22)";
+      ctx.fillRect(thermoX + thermoW + 20, yHigh, 260, (yLow - yHigh));
+
+      // Target line
+      const yTarget = yForTemp(state.target);
+      ctx.strokeStyle = "rgba(127,127,127,.8)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(thermoX + thermoW + 20, yTarget);
+      ctx.lineTo(thermoX + thermoW + 280, yTarget);
+      ctx.stroke();
+
+      // Labels
+      ctx.fillStyle = "rgba(200,200,200,.95)";
+      ctx.font = "16px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+      ctx.fillText(`temp:   ${state.temp.toFixed(1)} °C`, thermoX + thermoW + 20, thermoY + 20);
+      ctx.fillText(`target: ${state.target.toFixed(1)} °C`, thermoX + thermoW + 20, thermoY + 42);
+      ctx.fillText(`band:   [${low.toFixed(1)}, ${high.toFixed(1)}]`, thermoX + thermoW + 20, thermoY + 64);
+
+      // Current temp marker line
+      ctx.strokeStyle = "rgba(255,255,255,.85)";
+      ctx.beginPath();
+      ctx.moveTo(thermoX, yTemp);
+      ctx.lineTo(thermoX + thermoW, yTemp);
+      ctx.stroke();
+
+      // Action panel
+      const boxX = margin + 420;
+      const boxY = margin + 110;
+      const boxW = panelW - (boxX - margin) - 28;
+      const boxH = 170;
+
+      ctx.fillStyle = "rgba(127,127,127,.10)";
+      roundRect(ctx, boxX, boxY, boxW, boxH, 14);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(127,127,127,.35)";
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(220,220,220,.95)";
+      ctx.font = "18px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+      ctx.fillText("AI output (action):", boxX + 16, boxY + 36);
+
+      ctx.font = "40px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+      ctx.fillText(action, boxX + 16, boxY + 92);
+
+      ctx.font = "15px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+      const explain = decideAction(state).reason;
+      wrapText(ctx, "Why: " + explain, boxX + 16, boxY + 120, boxW - 32, 20);
+
+      // Scale ticks
+      ctx.font = "14px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+      ctx.fillStyle = "rgba(180,180,180,.95)";
+      for (let t = 0; t <= 40; t += 5) {
+        const y = yForTemp(t);
+        ctx.strokeStyle = "rgba(127,127,127,.35)";
+        ctx.beginPath();
+        ctx.moveTo(thermoX - 10, y);
+        ctx.lineTo(thermoX, y);
+        ctx.stroke();
+        ctx.fillText(String(t).padStart(2, " "), thermoX - 44, y + 5);
+      }
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+      const radius = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.arcTo(x + w, y, x + w, y + h, radius);
+      ctx.arcTo(x + w, y + h, x, y + h, radius);
+      ctx.arcTo(x, y + h, x, y, radius);
+      ctx.arcTo(x, y, x + w, y, radius);
+      ctx.closePath();
+    }
+
+    function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+      const words = text.split(/\s+/);
+      let line = "";
+      let yy = y;
+      for (let n = 0; n < words.length; n++) {
+        const testLine = line + words[n] + " ";
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxWidth && n > 0) {
+          ctx.fillText(line, x, yy);
+          line = words[n] + " ";
+          yy += lineHeight;
+        } else {
+          line = testLine;
+        }
+      }
+      ctx.fillText(line, x, yy);
+    }
+
+    // Test cases
+    let caseCount = 0;
+    function addCaseRow(state, out) {
+      caseCount += 1;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="mono">${caseCount}</td>
+        <td class="mono">${state.temp.toFixed(1)}</td>
+        <td class="mono">${state.target.toFixed(1)}</td>
+        <td class="mono">${state.deadband.toFixed(1)}</td>
+        <td class="mono"><b>${out.action}</b></td>
+        <td class="mono">${out.reason}</td>
+      `;
+      elCasesBody.appendChild(tr);
+    }
+
+    // Events
+    [elTemp, elTarget, elDeadband].forEach(el => el.addEventListener("input", updateUI));
+
+    document.getElementById("addCase").addEventListener("click", () => {
+      const state = getState();
+      const out = decideAction(state);
+      addCaseRow(state, out);
+    });
+
+    document.getElementById("clearCases").addEventListener("click", () => {
+      caseCount = 0;
+      elCasesBody.innerHTML = "";
+    });
+
+    document.getElementById("randomize").addEventListener("click", () => {
+      const rnd = (min, max, step) => {
+        const n = Math.round((min + Math.random() * (max - min)) / step) * step;
+        return Number(n.toFixed(2));
+      };
+      elTemp.value = rnd(0, 40, 0.5);
+      elTarget.value = rnd(10, 30, 0.5);
+      elDeadband.value = rnd(0, 3, 0.1);
+      updateUI();
+    });
+
+    // Init
+    updateUI();
+  </script>
+</body>
+</html>
+
